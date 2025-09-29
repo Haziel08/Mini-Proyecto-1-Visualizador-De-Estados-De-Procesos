@@ -1,8 +1,6 @@
-import threading
-import time
-import random
+import threading, time, random
 
-# --- Definición de Estados ---
+# --- Estados ---
 NUEVO = "Nuevo"
 LISTO = "Listo"
 EJECUCION = "En Ejecución"
@@ -10,13 +8,14 @@ BLOQUEADO = "Bloqueado"
 FINALIZADO = "Finalizado"
 
 class Proceso(threading.Thread):
-    def __init__(self, id_proceso, callback_actualizacion):
+    def __init__(self, id_proceso, callback_actualizacion, callback_finalizado):
         super().__init__()
         self.id = id_proceso
         self.estado = NUEVO
-        self.tiempo_total = random.randint(5, 12)  # segundos de ejecución simulada
+        self.tiempo_total = random.randint(5, 12)
         self.tiempo_ejecutado = 0
         self.callback = callback_actualizacion
+        self.callback_finalizado = callback_finalizado
         self.bloqueado = False
         self.detener = False
 
@@ -41,9 +40,10 @@ class Proceso(threading.Thread):
             self._notificar()
             time.sleep(0.5)
 
-        if not self.detener:
-            self.estado = FINALIZADO
-            self._notificar()
+        self.estado = FINALIZADO
+        self._notificar()
+        if self.callback_finalizado:
+            self.callback_finalizado(self)
 
     def _notificar(self):
         if self.callback:
@@ -57,36 +57,37 @@ class Proceso(threading.Thread):
 
     def terminar(self):
         self.detener = True
-        self.estado = FINALIZADO
-        self._notificar()
 
-
+# --- Planificador ---
 class Planificador:
-    def __init__(self, callback_actualizacion):
-        self.procesos = []
-        self.callback = callback_actualizacion
+    def __init__(self, callback_actualizacion, callback_finalizado):
+        self.procesos = {}
+        self.callback_actualizacion = callback_actualizacion
+        self.callback_finalizado = callback_finalizado
+        self.contador_id = 0
 
-    def agregar_proceso(self, proceso):
-        self.procesos.append(proceso)
+    def crear_proceso(self):
+        self.contador_id += 1
+        p = Proceso(self.contador_id, self.callback_actualizacion, self.callback_finalizado)
+        self.procesos[self.contador_id] = p
+        return p
 
-    def iniciar_procesos(self):
-        for p in self.procesos:
+    def iniciar_proceso(self, id_proceso):
+        p = self.procesos.get(id_proceso)
+        if p and not p.is_alive():
             p.start()
 
     def bloquear_proceso_por_id(self, id_proceso):
-        for p in self.procesos:
-            if p.id == id_proceso:
-                p.bloquear()
-                break
+        p = self.procesos.get(id_proceso)
+        if p:
+            p.bloquear()
 
     def desbloquear_proceso_por_id(self, id_proceso):
-        for p in self.procesos:
-            if p.id == id_proceso:
-                p.desbloquear()
-                break
+        p = self.procesos.get(id_proceso)
+        if p:
+            p.desbloquear()
 
     def detener_proceso_por_id(self, id_proceso):
-        for p in self.procesos:
-            if p.id == id_proceso:
-                p.terminar()
-                break
+        p = self.procesos.get(id_proceso)
+        if p:
+            p.terminar()
