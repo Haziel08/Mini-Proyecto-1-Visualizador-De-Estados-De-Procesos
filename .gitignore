@@ -1,0 +1,13 @@
+# Ignorar carpetas de caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignorar entornos virtuales
+venv/
+.env/
+
+# Ignorar archivos de sistema de Windows
+Thumbs.db
+desktop.ini
