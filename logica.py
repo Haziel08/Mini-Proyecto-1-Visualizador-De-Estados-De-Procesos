@@ -1,18 +1,19 @@
 import threading, time, random
 
-# --- Definición de Estados ---
+# --- Estados ---
 NUEVO = "Nuevo"
 LISTO = "Listo"
 EJECUCION = "En Ejecución"
 BLOQUEADO = "Bloqueado"
 FINALIZADO = "Finalizado"
+DETENIDO = "Detenido"
 
 class Proceso(threading.Thread):
     def __init__(self, id_proceso, callback_actualizacion, callback_finalizado):
         super().__init__()
         self.id = id_proceso
         self.estado = NUEVO
-        self.tiempo_total = random.randint(5, 12)
+        self.tiempo_total = random.randint(8, 15)
         self.tiempo_ejecutado = 0
         self.callback = callback_actualizacion
         self.callback_finalizado = callback_finalizado
@@ -48,27 +49,33 @@ class Proceso(threading.Thread):
             if self.bloqueado:
                 self._set_estado(BLOQUEADO)
                 time.sleep(random.uniform(1, 2))
-                if not self.detener:
-                    self._set_estado(LISTO)
+                if not self.detener: self._set_estado(LISTO)
                 continue
 
             self._set_estado(EJECUCION)
-            time.sleep(random.uniform(0.8, 1.2))
-            self.tiempo_ejecutado += 1
+            quantum = random.uniform(0.8, 1.2)
+            time.sleep(quantum)
+            self.tiempo_ejecutado += quantum
 
             if self.tiempo_ejecutado < self.tiempo_total and not self.detener:
                 self._set_estado(LISTO)
                 time.sleep(random.uniform(0.2, 0.5))
         
-        final_state = FINALIZADO if not self.detener else "Detenido"
+        final_state = FINALIZADO if not self.detener else DETENIDO
+
+        # --- CORRECCIÓN CLAVE ---
+        # Si el proceso terminó de forma natural, ajusta el tiempo ejecutado
+        # para que sea exactamente el 100% y no más.
+        if not self.detener:
+            self.tiempo_ejecutado = self.tiempo_total
+
         self._set_estado(final_state)
         
         if self.callback_finalizado:
             self.callback_finalizado(self)
 
     def _notificar(self):
-        if self.callback:
-            self.callback(self)
+        if self.callback: self.callback(self)
 
     def bloquear(self): self.bloqueado = True
     def desbloquear(self): self.bloqueado = False
@@ -102,3 +109,24 @@ class Planificador:
     def detener_proceso_por_id(self, id_proceso):
         p = self.procesos.get(id_proceso)
         if p: p.terminar()
+
+    # --- MÉTODOS DE CONTROL GLOBAL ---
+    def iniciar_todos(self):
+        for p in self.procesos.values():
+            if not p.is_alive() and p.estado == NUEVO:
+                p.start()
+
+    def bloquear_todos_activos(self):
+        for p in self.procesos.values():
+            if p.is_alive() and not p.bloqueado and p.estado not in (FINALIZADO, DETENIDO, BLOQUEADO):
+                p.bloquear()
+
+    def desbloquear_todos_bloqueados(self):
+        for p in self.procesos.values():
+            if p.bloqueado:
+                p.desbloquear()
+
+    def detener_todos_activos(self):
+        for p in self.procesos.values():
+            if p.is_alive() and p.estado not in (FINALIZADO, DETENIDO):
+                p.terminar()

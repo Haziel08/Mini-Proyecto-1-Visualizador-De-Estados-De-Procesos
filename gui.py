@@ -2,7 +2,8 @@ import tkinter as tk
 from tkinter import ttk, font
 import time
 
-# --- Paleta de Colores y Estilos ---
+# --- Constantes y Paleta de Colores (LÍMITE CAMBIADO) ---
+MAX_PROCESOS = 10
 COLOR_FONDO_INICIO = "#4A00E0"
 COLOR_FONDO_FIN = "#8E2DE2"
 COLOR_CARD = "#2C2C4A"
@@ -14,7 +15,6 @@ COLOR_BLOQUEADO = "#FF512F"
 COLOR_FINALIZADO_CARD = "#004D25"
 COLOR_FINALIZADO_BAR = "#4CAF50"
 
-# --- Ventana para la Gráfica (AHORA DINÁMICA) ---
 class VentanaGrafica:
     def __init__(self, master, procesos_dict):
         self.top = tk.Toplevel(master)
@@ -34,19 +34,17 @@ class VentanaGrafica:
         self.canvas.configure(xscrollcommand=hbar.set)
         
         self._dibujar_leyenda()
-        self.actualizar_grafica() # Inicia el bucle de actualización
+        self.actualizar_grafica()
 
     def _on_close(self):
-        """Detiene el bucle de actualización al cerrar la ventana."""
         self.is_running = False
         self.top.destroy()
 
     def actualizar_grafica(self):
-        """Dibuja y programa la siguiente actualización."""
         if not self.is_running:
             return
         self.dibujar_grafica()
-        self.top.after(1000, self.actualizar_grafica) # Auto-refresca cada segundo
+        self.top.after(1000, self.actualizar_grafica)
 
     def dibujar_grafica(self):
         self.canvas.delete("grafica")
@@ -60,10 +58,8 @@ class VentanaGrafica:
         ROW_HEIGHT = 60
         PADDING_X = 110
 
-        # CORRECCIÓN: El tiempo de inicio es siempre el del primer evento de todos los tiempos.
         start_time = min(p.history[0][0] for p in procesos if p.history)
         
-        # CORRECCIÓN: El tiempo final se congela si todos los procesos han terminado.
         all_finished = all(p.estado in ("Finalizado", "Detenido") for p in procesos)
         if all_finished:
             end_time = max(p.history[-1][0] for p in procesos if p.history)
@@ -71,25 +67,27 @@ class VentanaGrafica:
             end_time = time.time()
 
         total_duration = end_time - start_time
-        if total_duration < 10: total_duration = 10
+        if total_duration < 1: total_duration = 1
+
+        if total_duration <= 30: tick_interval = 2
+        elif total_duration <= 120: tick_interval = 10
+        elif total_duration <= 300: tick_interval = 30
+        else: tick_interval = 60
 
         canvas_width = 2000
         self.canvas.config(scrollregion=(0, 0, canvas_width, len(procesos) * ROW_HEIGHT + PADDING_Y))
         pixels_per_second = (canvas_width - PADDING_X) / total_duration
 
-        # Dibuja Ejes
         self.canvas.create_line(PADDING_X, PADDING_Y - 20, PADDING_X, PADDING_Y + len(procesos) * ROW_HEIGHT, fill="gray", tags="grafica")
-        for i in range(int(total_duration) + 2):
-            x = PADDING_X + i * pixels_per_second
+        for t in range(0, int(total_duration) + tick_interval, tick_interval):
+            x = PADDING_X + t * pixels_per_second
             self.canvas.create_line(x, PADDING_Y - 10, x, PADDING_Y - 20, fill="gray", tags="grafica")
-            self.canvas.create_text(x, PADDING_Y - 25, text=f"{i}s", anchor="n", font=("Roboto", 8), tags="grafica")
+            self.canvas.create_text(x, PADDING_Y - 25, text=f"{t}s", anchor="n", font=("Roboto", 8), tags="grafica")
 
-        # Dibuja la línea de tiempo de cada proceso
         for i, proceso in enumerate(procesos):
             y_base = PADDING_Y + i * ROW_HEIGHT
             self.canvas.create_text(PADDING_X - 10, y_base + ROW_HEIGHT/2, text=f"Proceso {proceso.id}", anchor="e", font=("Roboto", 10, "bold"), tags="grafica")
 
-            # CORRECCIÓN: Dibuja una línea de "Inactivo" si el proceso se creó después del inicio.
             process_creation_time = proceso.history[0][0]
             if process_creation_time > start_time:
                 inactive_start_x = PADDING_X
@@ -99,7 +97,8 @@ class VentanaGrafica:
             for j in range(len(proceso.history)):
                 ts, estado = proceso.history[j]
                 start_x = PADDING_X + (ts - start_time) * pixels_per_second
-                end_ts = proceso.history[j+1][0] if j + 1 < len(proceso.history) else end_time
+                current_end_time = time.time() if not all_finished else end_time
+                end_ts = proceso.history[j+1][0] if j + 1 < len(proceso.history) else current_end_time
                 end_x = PADDING_X + (end_ts - start_time) * pixels_per_second
 
                 if estado == "En Ejecución":
@@ -108,6 +107,11 @@ class VentanaGrafica:
                     self.canvas.create_rectangle(start_x, y_base + 20, end_x, y_base + ROW_HEIGHT - 20, fill=COLOR_BLOQUEADO, outline="", tags="grafica")
                 elif estado == "Listo":
                     self.canvas.create_line(start_x, y_base + ROW_HEIGHT/2, end_x, y_base + ROW_HEIGHT/2, fill="#777777", width=3, dash=(2, 4), tags="grafica")
+            
+            if proceso.estado in ("Finalizado", "Detenido"):
+                lifetime = proceso.history[-1][0] - proceso.history[0][0]
+                final_x = PADDING_X + (proceso.history[-1][0] - start_time) * pixels_per_second
+                self.canvas.create_text(final_x + 8, y_base + ROW_HEIGHT/2, text=f"({lifetime:.1f}s)", anchor="w", font=("Roboto", 8, "italic"), fill="#555", tags="grafica")
 
     def _dibujar_leyenda(self):
         y_pos, x_pos, font_leyenda = 20, 110, ("Roboto", 9)
@@ -115,15 +119,12 @@ class VentanaGrafica:
         self.canvas.create_rectangle(x_pos, y_pos-5, x_pos+20, y_pos+5, fill=COLOR_ACCENT_NORMAL, outline="")
         self.canvas.create_text(x_pos + 25, y_pos, text="En Ejecución", anchor="w", font=font_leyenda)
         x_pos += 120
-        
         self.canvas.create_rectangle(x_pos, y_pos-3, x_pos+20, y_pos+3, fill=COLOR_BLOQUEADO, outline="")
         self.canvas.create_text(x_pos + 25, y_pos, text="Bloqueado", anchor="w", font=font_leyenda)
         x_pos += 120
-        
         self.canvas.create_line(x_pos, y_pos, x_pos+20, y_pos, fill="#777777", width=3, dash=(2, 4))
         self.canvas.create_text(x_pos + 25, y_pos, text="Listo", anchor="w", font=font_leyenda)
         x_pos += 100
-
         self.canvas.create_line(x_pos, y_pos, x_pos+20, y_pos, fill="#E0E0E0", width=5)
         self.canvas.create_text(x_pos + 25, y_pos, text="Inactivo", anchor="w", font=font_leyenda)
 
@@ -135,8 +136,7 @@ class InterfazGrafica:
         self.root.title("Mini Proyecto 1 - Visualizador de Procesos")
         self.root.geometry("800x600")
         self.root.minsize(600, 400)
-        self.is_closing = False # Bandera para controlar el cierre
-
+        
         self.font_bold = font.Font(family="Roboto", size=12, weight="bold")
         self.font_normal = font.Font(family="Roboto", size=10)
         self.font_small = font.Font(family="Roboto", size=9)
@@ -166,22 +166,43 @@ class InterfazGrafica:
         self.canvas_fondo.place(x=0, y=0, relwidth=1, relheight=1)
         
         self.top_frame = tk.Frame(self.root)
-        self.top_frame.pack(side="top", fill="x", pady=10)
+        self.top_frame.pack(side="top", fill="x", pady=5)
         
         self.lbl_titulo = tk.Label(self.top_frame, text="Mini Proyecto 1 - Visualizador de Procesos", font=font.Font(family="Roboto", size=16, weight="bold"), fg=COLOR_TEXTO_PRINCIPAL)
         self.lbl_titulo.pack(pady=(5,0))
 
-        btn_container = tk.Frame(self.top_frame)
-        btn_container.pack(pady=15)
+        main_controls_container = tk.Frame(self.top_frame)
+        main_controls_container.pack(pady=10)
 
-        btn_agregar = tk.Button(btn_container, text="+ Agregar Proceso", font=self.font_bold, bg=COLOR_ACCENT_NORMAL, fg="#000000", relief="flat", padx=15, pady=5, command=self._agregar_proceso, borderwidth=0, cursor="hand2")
-        btn_agregar.pack(side="left", padx=10)
-        self._animate_button(btn_agregar, COLOR_ACCENT_HOVER, COLOR_ACCENT_NORMAL)
+        self.btn_agregar = tk.Button(main_controls_container, text="+ Agregar Proceso", font=self.font_bold, bg=COLOR_ACCENT_NORMAL, fg="#000000", relief="flat", padx=15, pady=5, command=self._agregar_proceso, borderwidth=0, cursor="hand2")
+        self.btn_agregar.pack(side="left", padx=10)
+        self._animate_button(self.btn_agregar, COLOR_ACCENT_HOVER, COLOR_ACCENT_NORMAL)
 
-        btn_grafica = tk.Button(btn_container, text="📊 Ver Gráfica de Tiempos", font=self.font_bold, bg="#7F00FF", fg="white", relief="flat", padx=15, pady=5, command=self._abrir_ventana_grafica, borderwidth=0, cursor="hand2")
+        btn_grafica = tk.Button(main_controls_container, text="📊 Ver Gráfica", font=self.font_bold, bg="#7F00FF", fg="white", relief="flat", padx=15, pady=5, command=self._abrir_ventana_grafica, borderwidth=0, cursor="hand2")
         btn_grafica.pack(side="left", padx=10)
         self._animate_button(btn_grafica, "#9933FF", "#7F00FF")
 
+        global_controls_frame = tk.Frame(self.top_frame)
+        global_controls_frame.pack(pady=(0, 5))
+        
+        font_global_btn = font.Font(family="Roboto", size=9)
+        
+        btn_iniciar_todos = tk.Button(global_controls_frame, text="▶ Iniciar Todos", font=font_global_btn, bg="#2E7D32", fg="white", relief="flat", command=self.planificador.iniciar_todos, borderwidth=0, cursor="hand2")
+        btn_iniciar_todos.pack(side="left", padx=5, pady=5)
+        self._animate_button(btn_iniciar_todos, "#388E3C", "#2E7D32")
+
+        btn_bloquear_todos = tk.Button(global_controls_frame, text="⏸ Bloquear Activos", font=font_global_btn, bg="#F57C00", fg="white", relief="flat", command=self.planificador.bloquear_todos_activos, borderwidth=0, cursor="hand2")
+        btn_bloquear_todos.pack(side="left", padx=5, pady=5)
+        self._animate_button(btn_bloquear_todos, "#FF9800", "#F57C00")
+
+        btn_desbloquear_todos = tk.Button(global_controls_frame, text="▶ Desbloquear Todos", font=font_global_btn, bg="#0288D1", fg="white", relief="flat", command=self.planificador.desbloquear_todos_bloqueados, borderwidth=0, cursor="hand2")
+        btn_desbloquear_todos.pack(side="left", padx=5, pady=5)
+        self._animate_button(btn_desbloquear_todos, "#03A9F4", "#0288D1")
+
+        btn_detener_todos = tk.Button(global_controls_frame, text="⏹ Detener Todos", font=font_global_btn, bg="#D32F2F", fg="white", relief="flat", command=self.planificador.detener_todos_activos, borderwidth=0, cursor="hand2")
+        btn_detener_todos.pack(side="left", padx=5, pady=5)
+        self._animate_button(btn_detener_todos, "#F44336", "#D32F2F")
+        
         self.canvas_scroll = tk.Canvas(self.root, borderwidth=0, highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas_scroll.yview)
         self.contenedor_procesos = tk.Frame(self.canvas_scroll)
@@ -215,15 +236,23 @@ class InterfazGrafica:
 
         if self.canvas_fondo.find_all():
             top_color = self.canvas_fondo.itemcget(self.canvas_fondo.find_all()[0], "fill")
-            for widget in [self.top_frame, self.lbl_titulo, self.canvas_scroll, self.contenedor_procesos, self.top_frame.winfo_children()[1]]:
-                if widget: widget.config(bg=top_color)
+            for widget in self.top_frame.winfo_children():
+                widget.config(bg=top_color)
+            for widget in [self.top_frame, self.lbl_titulo, self.canvas_scroll, self.contenedor_procesos]:
+                if widget and widget.winfo_exists(): widget.config(bg=top_color)
     
     def _abrir_ventana_grafica(self):
         VentanaGrafica(self.root, self.planificador.procesos)
 
     def _agregar_proceso(self):
+        if len(self.planificador.procesos) >= MAX_PROCESOS:
+            return
+
         proceso = self.planificador.crear_proceso()
         pid = proceso.id
+
+        if len(self.planificador.procesos) >= MAX_PROCESOS:
+            self.btn_agregar.config(state="disabled", text="Límite alcanzado")
         
         card = tk.Frame(self.contenedor_procesos, bg=COLOR_CARD, relief="flat", highlightthickness=1, highlightbackground="#4A4A7A")
         card.pack(fill="x", pady=8, padx=5)
@@ -276,9 +305,6 @@ class InterfazGrafica:
         button.bind("<Leave>", func=lambda e: button.config(background=leave_color))
         
     def _on_closing(self):
-        self.is_closing = True # Activa la bandera de cierre
-        for pid in list(self.planificador.procesos.keys()):
-            self.planificador.detener_proceso_por_id(pid)
         self.root.destroy()
         
     def _iniciar_proceso(self, pid):
@@ -290,11 +316,8 @@ class InterfazGrafica:
         self.planificador.detener_proceso_por_id(pid)
     
     def actualizar_proceso(self, proceso):
-        if self.is_closing: # Si la ventana se está cerrando, ignora las actualizaciones
-            return
-
         pid = proceso.id
-        if pid in self.widgets_proceso:
+        if pid in self.widgets_proceso and self.widgets_proceso[pid]["card"].winfo_exists():
             widgets = self.widgets_proceso[pid]
             widgets["estado"].config(text=proceso.estado)
             widgets["tcpu"].config(text=f"{proceso.last_execution_time_ms:.0f} ms")
@@ -313,7 +336,7 @@ class InterfazGrafica:
 
     def finalizar_proceso(self, proceso):
         pid = proceso.id
-        if pid in self.widgets_proceso:
+        if pid in self.widgets_proceso and self.widgets_proceso[pid]["card"].winfo_exists():
             widgets = self.widgets_proceso[pid]
             widgets["menu_button"].config(state="disabled")
             
